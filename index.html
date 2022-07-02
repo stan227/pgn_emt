@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Move Time Converter</title>
+    <link href="bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="container"><div class="row justify-content-center">
+      <h1>Add Move Time to PGN</h1>
+        <form>
+        <div class="mb-3 form-check">
+          <input type="checkbox" class="form-check-input" id="add-emt">
+          <label class="form-check-label" for="add-emt">Add emt tag</label>
+        </div>
+        <div class="mb-3 form-check">
+          <input type="checkbox" class="form-check-input" id="add-emt-comment" checked>
+          <label class="form-check-label" for="add-emt-comment">Add time as comment</label>
+        </div>
+        <div class="mb-3 form-check">
+          <input type="checkbox" class="form-check-input" id="wrap-lines">
+          <label class="form-check-label" for="wrap-lines">Wrap lines after 80 characters</label>
+        </div>
+        <div class="mb-3">
+          <label for="increment" class="form-label">Increment</label>
+          <input type="text" class="form-control" id="increment" value="0">
+        </div>
+        <div class="mb-3">
+          <label for="input-pgn" class="form-label">PGN</label>
+          <textarea class="form-control" id="input-pgn" rows=8></textarea>
+        </div>
+        <div class="mb-3">
+          <label for="output-pgn" class="form-label">PGN with Move Times</label>
+          <textarea class="form-control" id="output-pgn" rows=8 readonly></textarea>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="addMoveTimes()">Add Move Times</button>
+      </form>
+    </div></div>
+    <script>
+      function addMoveTimes() {
+      
+        let pgn = document.getElementById("input-pgn").value
+        let increment = parseInt(document.getElementById("increment").value)
+        let addemt = document.getElementById("add-emt").checked
+        let addcomment = document.getElementById("add-emt-comment").checked
+        let wraplines = document.getElementById("wrap-lines").checked
+        let lines = pgn.split("\n")
+        
+        let lastheaderline = findHeaderEnd(lines)
+        let header = lines.slice(0, lastheaderline+1).join("\n")
+        
+        let split = lines.slice(lastheaderline+1).join(" ").split("[%clk ")
+        
+        const clktimes = extractCLKTimes(split)
+        const movetimes = computeMoveTimes(clktimes, increment)
+        const moves = insertMoveTimes(split, movetimes, addemt, addcomment)
+        const output = wraplines ? wrapLines(moves) : moves
+        
+        document.getElementById("output-pgn").innerHTML = header + "\n" + output
+      }
+      
+      function findHeaderEnd(lines) {
+      
+        for (let i = 0; i < lines.length; ++i) {
+          
+          if (lines[i].slice(0,2) == "1.") {
+            return i-1
+          }
+        }
+        
+        return lines.length-1
+      }
+      
+      function insertMoveTimes(split, movetimes, asemt, ascomment) {
+        
+        const updatedsplit = []
+        
+        updatedsplit.push(split[0])
+        
+        for (let i = 1; i < split.length; ++i) {
+        
+          currentmove = split[i]
+          
+          if (i < 3 || i-3 >= movetimes.length) {
+            updatedsplit.push(currentmove)
+            continue
+          }
+          movetime = movetimes[i-3]
+          
+          clkend = currentmove.indexOf("]")
+          clk = currentmove.slice(0, clkend + 1)
+          groupend = currentmove.indexOf("}")
+          tagend = currentmove.slice(0, groupend).lastIndexOf("]")
+          tags = currentmove.slice(clkend + 1, tagend + 1)
+          rest = currentmove.slice(tagend + 1)
+          
+          updatedmove = clk
+          
+          if (asemt) {
+            updatedmove = updatedmove.concat("[%emt ", formatMoveTime(movetime, true), "]")
+          }
+          
+          updatedmove = updatedmove.concat(tags)
+          
+          if (ascomment) {
+          
+            updatedmove = updatedmove.concat(formatMoveTime(movetime, false))
+            
+            if (rest.slice(0,1) != "}" && rest.slice(0,1) != " ") {
+              updatedmove = updatedmove.concat(" ")
+            }
+          }
+          
+          updatedsplit.push(updatedmove.concat(rest))
+        }
+
+        return updatedsplit.join("[%clk ")
+      }
+      
+      function extractCLKTimes(pgnsplit) {
+      
+        const clktimes = []
+        for (let i=1; i < pgnsplit.length; ++i) {
+          
+          time = pgnsplit[i].split("]")[0]
+          split = time.split(":")
+          clktimes.push(parseInt(split[0])*3600 + parseInt(split[1]*60) + parseFloat(split[2]))
+        }
+        
+        return clktimes
+      }
+      
+      function computeMoveTimes(clktimes, increment) {
+        
+        const movetimes = []
+        for (let i = 0; i < clktimes.length-2; ++i) {
+        
+          movetimes.push(clktimes[i] - clktimes[i+2] + increment)
+        }
+        
+        return movetimes;
+       }
+       
+       function formatMoveTime(timeinseconds, strict) {
+         
+         let roundedtime = Math.floor(timeinseconds)
+         let deciseconds = Math.floor((timeinseconds - roundedtime) * 10)
+         let seconds = roundedtime % 60
+         var remainingminutes = (roundedtime - seconds) / 60
+         let minutes = remainingminutes % 60
+         let hours = (remainingminutes - minutes) / 60
+         
+         if (strict) {
+         
+           return "".concat(hours, ":", pad(minutes), ":", pad(seconds)) 
+         }
+         
+         var formatted = ""
+         
+         if (hours > 0) {
+           formatted = formatted.concat(hours, ":")
+         }
+         
+         if (hours > 0 || minutes > 0) {
+           formatted = addPaddedTime(formatted, minutes).concat(":")
+         }
+         
+         if (formatted == "") {
+           formatted = ":"
+         }
+         
+         formatted = addPaddedTime(formatted, seconds)
+         
+         if (hours + minutes == 0 && seconds <= 5) {
+           formatted = formatted.concat(".", deciseconds)
+         }
+         
+         return formatted
+       }
+       
+       function addPaddedTime(prefix, time) {
+       
+         if (prefix.length == 0) {
+           return "".concat(time)
+         }
+         return prefix.concat(pad(time))
+       }
+       
+       function pad(num) {
+       
+         if (num == 0) {
+           return "00"
+         }
+         
+         if (num < 10) {
+           return "0".concat(num)
+         }
+         
+         return num
+       }
+       
+       function wrapLines(line) {
+         
+         lastspace = 0
+         remainder = line
+         result = ""
+         
+         while (remainder.length > 80) {
+         
+           for (let i = 0; i < remainder.length; ++i) {
+           
+             if (i > 80 && i == remainder.length-1) {
+               result = result.concat(remainder, "\n")
+               remainder = ""
+               break
+             }
+           
+             let token = remainder.slice(i, i+1)
+             
+             if (i >= 80) {
+             
+               if (token == " ") {
+
+                 result = result.concat(remainder.slice(0,i), "\n")
+                 remainder = remainder.slice(i+1)
+                 lastspace = 0
+                 break
+               }
+               
+               if (lastspace > 0) {
+                 
+                 result = result.concat(remainder.slice(0,lastspace), "\n")
+                 remainder = remainder.slice(lastspace+1)
+                 lastspace = 0
+                 break
+               }
+             }
+           
+             if (token == " ") {
+               lastspace = i
+             }
+           }
+         }
+         
+         if (remainder.length > 0) {
+           result = result.concat(remainder, "\n")
+         }
+         
+         return result
+       }
+    </script>
+  </body>
+</html>
